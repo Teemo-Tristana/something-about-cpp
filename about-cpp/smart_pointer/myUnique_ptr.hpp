@@ -13,6 +13,9 @@ public:
     //所有的智能指针都有一个explicit构造函数：这个构造函数将指针作为参数
     explicit myUnique_ptr(T *ptr = nullptr) noexcept : _ptr(ptr) {}
 
+
+    // myUnique_ptr(const myUnique_ptr& ) = delete; //禁用复制构造函数  |或者将其放到priavate中
+    // myUnique_ptr& operator=(const myUnique_ptr&)= delete; //禁用赋值造函数 |或者将其放到priavate中
     ~myUnique_ptr() noexcept
     {
         delete _ptr;
