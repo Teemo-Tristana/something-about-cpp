@@ -1,11 +1,22 @@
 #include "header.h"
 
+
+
+char *strcpy(char *dst, const char *src)
+{
+    assert(dst != nullptr);
+    assert(src != nullptr);
+    char *ret = dst;
+    memcpy(dst, src, strlen(src + 1));
+    return ret;
+}
+
 /*
 memove和memcpy作用相同，都是从拷贝一定长度的内存内容
 唯一区别在于: 当内存发生重叠时，memmove保证拷贝结果是准确度，而memcpy不保证拷贝结果是正确的。
 */
 
-void *memcpy(void *dst, const void *src, unsigned int count)
+void * memcpy(void *dst, const void *src, unsigned int count)
 {
     assert(dst != nullptr);
     assert(src != nullptr);
@@ -26,15 +37,6 @@ void *memcpy(void *dst, const void *src, unsigned int count)
         ps++;
     }
     return dst;
-}
-
-char *strcpy(char *dst, const char *src)
-{
-    assert(dst != nullptr);
-    assert(src != nullptr);
-    char *ret = dst;
-    memcpy(dst, src, strlen(src + 1));
-    return ret;
 }
 
 void *memmove(void *dst, const void *src, size_t count)
