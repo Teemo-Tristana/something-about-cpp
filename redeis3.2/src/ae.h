@@ -40,12 +40,13 @@
 
 #define AE_NONE 0       /* No events registered. */
 #define AE_READABLE 1   /* Fire when descriptor is readable. */
-#define AE_WRITABLE 2   /* Fire when descriptor is writable. */
-#define AE_BARRIER 4    /* With WRITABLE, never fire the event if the
-                           READABLE event already fired in the same event
-                           loop iteration. Useful when you want to persist
-                           things to disk before sending replies, and want
-                           to do that in a group fashion. */
+#define AE_WRITABLE 2   /* Fire when descriptor is writable. */ 
+/*
+ * With WRITABLE, never fire the event if the READABLE event already fired in the same event loop iteration.
+ * Useful when you want to persist things to disk before sending replies, 
+ * and wantto do that in a group fashion.*/
+#define AE_BARRIER 4 
+  
 
 #define AE_FILE_EVENTS (1<<0)
 #define AE_TIME_EVENTS (1<<1)
@@ -63,9 +64,17 @@
 struct aeEventLoop;
 
 /* Types and data structures */
+/* 事件接口 */
+// 文件事件处理
 typedef void aeFileProc(struct aeEventLoop *eventLoop, int fd, void *clientData, int mask);
+
+// 时间事件处理
 typedef int aeTimeProc(struct aeEventLoop *eventLoop, long long id, void *clientData);
+
+// 事件处理之后需要做的处理
 typedef void aeEventFinalizerProc(struct aeEventLoop *eventLoop, void *clientData);
+
+// 事件处理之后前要做的处理
 typedef void aeBeforeSleepProc(struct aeEventLoop *eventLoop);
 
 /* File event structure */

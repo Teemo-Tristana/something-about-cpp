@@ -157,7 +157,7 @@ void aeStop(aeEventLoop *eventLoop) {
 }
 /**
  * 注册新的事件：将 fd 注册到 eventLoop 事件表中
- * 根据参数 mask，当 fd 可用时，执行 proc 函数
+ *     根据参数 mask，当 fd 可用时，执行 proc 函数，将 指定的套接字(fd)的给定事件加入到 I/O 多路复用程序纳入监听范围之内,并将事件和事件处理器(处理函数)进行关联
 */
 int aeCreateFileEvent(aeEventLoop *eventLoop, int fd, int mask,
         aeFileProc *proc, void *clientData)
@@ -166,31 +166,55 @@ int aeCreateFileEvent(aeEventLoop *eventLoop, int fd, int mask,
         errno = ERANGE;
         return AE_ERR;
     }
+
+    // 指向 文件事件
     aeFileEvent *fe = &eventLoop->events[fd];
 
+    // 监听 fd 上指定的事件（这里调用的是 select）
     if (aeApiAddEvent(eventLoop, fd, mask) == -1)
         return AE_ERR;
+
+    // 设置文件事件类型
     fe->mask |= mask;
+
+    // 设置事件处理器(处理函数)
     if (mask & AE_READABLE) fe->rfileProc = proc;
     if (mask & AE_WRITABLE) fe->wfileProc = proc;
+
+    // 多路复用专用的私有数据
     fe->clientData = clientData;
+    
+    // 如果新的fd大于 maxfd，则更新 maxfd
     if (fd > eventLoop->maxfd)
         eventLoop->maxfd = fd;
     return AE_OK;
 }
 
+
+/**
+ * 将 fd 从 mask 指定的监听队列中移除
+ *   取消对给定套接字的给定事件的监听 
+ */ 
 void aeDeleteFileEvent(aeEventLoop *eventLoop, int fd, int mask)
 {
     if (fd >= eventLoop->setsize) return;
+
+    // 获取给定的 文件事件 
     aeFileEvent *fe = &eventLoop->events[fd];
     if (fe->mask == AE_NONE) return;
 
     /* We want to always remove AE_BARRIER if set when AE_WRITABLE
      * is removed. */
+    // 若 ae_wrirtable 设置为移除时，则也将 ae_barrier 也移除
     if (mask & AE_WRITABLE) mask |= AE_BARRIER;
 
+    // 取消对指定fd的指定事件的监听
     aeApiDelEvent(eventLoop, fd, mask);
+
+    // 计算掩码
     fe->mask = fe->mask & (~mask);
+
+    // 更新 maxfd
     if (fd == eventLoop->maxfd && fe->mask == AE_NONE) {
         /* Update the max fd */
         int j;
@@ -201,6 +225,10 @@ void aeDeleteFileEvent(aeEventLoop *eventLoop, int fd, int mask)
     }
 }
 
+/**
+ * 获取 fd 注册事件的类型
+ *  返回 fd 正在被监听的事件的类型
+*/
 int aeGetFileEvents(aeEventLoop *eventLoop, int fd) {
     if (fd >= eventLoop->setsize) return 0;
     aeFileEvent *fe = &eventLoop->events[fd];
@@ -348,26 +376,49 @@ static int processTimeEvents(aeEventLoop *eventLoop) {
  * if flags has AE_DONT_WAIT set the function returns ASAP until all
  * the events that's possible to process without to wait are processed.
  * if flags has AE_CALL_AFTER_SLEEP set, the aftersleep callback is called.
- * if flags has AE_CALL_BEFORE_SLEEP set, the beforesleep callback is called.
+ * if flags has AE_CALL_BEFORE_SLEEP set, the beforesleep callback is called.g
  *
  * The function returns the number of events processed. */
+
+/**
+ * 文件事件分派器
+ * 处理所有已达到的时间时间以及已到达的文件事件(可以是被前面刚处理的时间事件调用)
+ * 若没有特殊指定 flags 标识的话，则该函数休眠直到文件事件发生或下个时间事件达到
+ * 
+ * flag = 0，则 flag 不执行任何操作
+ * flag 被设置为 ae_all_events,  则可以处理所有类型的事件
+ * flag 被设置为 ae_file_events, 则处理文件事件
+ * flag 被设置为 ae_time_events, 则处理时间时间
+ * flag 被设置为 ae_dont_wait, 则处理完所有无须等待即可处理的事件后，立即返回
+ * flag 被设置为 ae_call_after_sleep, 则 afersleep() 函数被调用
+ * flag 被设置为 ae_call_berfore_sleep, 则 beforesleep() 函数被调用
+ * 
+ * 函数的返回值是已处理事件的数量
+ * 
+*/
+// 文件事件分配器： 调用 aeApiPoll() 函数来等待事件的产生，然后遍历已产生的事件，并调用相应的事件处理器来处理这些事件
 int aeProcessEvents(aeEventLoop *eventLoop, int flags)
 {
     int processed = 0, numevents;
 
     /* Nothing to do? return ASAP */
+    /* 没有监听任何事件 */
     if (!(flags & AE_TIME_EVENTS) && !(flags & AE_FILE_EVENTS)) return 0;
 
     /* Note that we want call select() even if there are no
      * file events to process as long as we want to process time
      * events, in order to sleep until the next time event is ready
      * to fire. */
+
+    // 即使没有文件事件待处理，但仍然调用 select() , 让其阻塞直到想要处理的定时事件发生为止    
     if (eventLoop->maxfd != -1 ||
+        // 如果有定时事件
         ((flags & AE_TIME_EVENTS) && !(flags & AE_DONT_WAIT))) {
         int j;
         struct timeval tv, *tvp;
         long msUntilTimer = -1;
 
+        // 获取最近的时间事件
         if (flags & AE_TIME_EVENTS && !(flags & AE_DONT_WAIT))
             msUntilTimer = msUntilEarliestTimer(eventLoop);
 
@@ -380,10 +431,12 @@ int aeProcessEvents(aeEventLoop *eventLoop, int flags)
              * ASAP because of AE_DONT_WAIT we need to set the timeout
              * to zero */
             if (flags & AE_DONT_WAIT) {
+                // 设置事件不阻塞
                 tv.tv_sec = tv.tv_usec = 0;
                 tvp = &tv;
             } else {
                 /* Otherwise we can block */
+                // 文件事件可以阻塞直有事件发生为止
                 tvp = NULL; /* wait forever */
             }
         }
@@ -398,6 +451,7 @@ int aeProcessEvents(aeEventLoop *eventLoop, int flags)
 
         /* Call the multiplexing API, will return only on timeout or when
          * some event fires. */
+        // 调用多路复用 API ，当有事件发生或超时则返回
         numevents = aeApiPoll(eventLoop, tvp);
 
         /* After sleep callback. */
@@ -467,15 +521,23 @@ int aeProcessEvents(aeEventLoop *eventLoop, int flags)
 
 /* Wait for milliseconds until the given file descriptor becomes
  * writable/readable/exception */
+/**
+ * 在给定的时间内(ms)等待直到 fd 可写/可读/异常
+*/
 int aeWait(int fd, int mask, long long milliseconds) {
     struct pollfd pfd;
     int retmask = 0, retval;
 
     memset(&pfd, 0, sizeof(pfd));
     pfd.fd = fd;
+    
+    // 可读
     if (mask & AE_READABLE) pfd.events |= POLLIN;
+
+    // 可写
     if (mask & AE_WRITABLE) pfd.events |= POLLOUT;
 
+    // 调用 poll 
     if ((retval = poll(&pfd, 1, milliseconds))== 1) {
         if (pfd.revents & POLLIN) retmask |= AE_READABLE;
         if (pfd.revents & POLLOUT) retmask |= AE_WRITABLE;
