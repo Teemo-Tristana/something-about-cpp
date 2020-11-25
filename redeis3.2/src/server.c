@@ -1903,7 +1903,24 @@ void cronUpdateMemoryStats() {
  * so in order to throttle execution of things we want to do less frequently
  * a macro is used: run_with_period(milliseconds) { .... }
  */
-
+/**
+ * Redis 的时间中断器，每秒调用一次 server.hz
+ * 以下是需要异步执行的操作：
+ * - 清理数据库的过去键值对
+ * - 更新软件 watchdog
+ * - 更新各类统计信息
+ * - 对数据库进行渐进式  rehash
+ * - 触发 bgsave / aof 重写，处理之后终止其子进程
+ * - 处理各类超时客户端
+ * - 复制重连
+ * - 等等...
+ * 
+ * 因为 serverCron 函数中的所有代码都会每秒调用 server.hz 次，
+ * 为了对部分代码的调用次数进行限制，
+ * 使用了一个宏 run_with_period(milliseconds) { ... } ，
+ * 这个宏可以将被包含代码的执行次数降低为每 milliseconds 执行一次。
+*/
+// Redis 服务器周期性的运行 serverCron() 函数，可以通过 hz 参数来修改运行频率
 int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
     int j;
     UNUSED(eventLoop);

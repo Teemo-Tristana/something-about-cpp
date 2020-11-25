@@ -102,18 +102,18 @@ typedef struct aeTimeEvent {
     // 时间事件的到达时间
     monotime when;
 
-    // 时间事件处理函数
+    // 函数指针，指向时间事件处理的函数
     aeTimeProc *timeProc;
 
-    // 时间事件释放函数
+    // 函数指针，指向时间事件的释放函数，删除时间事件节点之前会调用此函数
     aeEventFinalizerProc *finalizerProc;
 
-    // 多路复用私有数据
+    // 函数指针，指向对应的客户端对象(多路复用私有数据)
     void *clientData;
 
-    // 指向上一个时间事件(前行指针)
+    // 指向上一个时间事件节点
     struct aeTimeEvent *prev;
-     // 指向下一个时间事件(后续指针)
+     // 指向下一个时间事件节点
     struct aeTimeEvent *next;
 
     // 引用计数： 防止在递归时间事件调用时，时间事件被释放
