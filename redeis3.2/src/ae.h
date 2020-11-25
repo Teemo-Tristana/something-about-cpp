@@ -89,7 +89,7 @@ typedef struct aeFileEvent {
     // 写事件处理器
     aeFileProc *wfileProc;
 
-    // 多路复用私有数据
+    // 函数指针，指向对应的客户端对象(多路复用私有数据)
     void *clientData;
 } aeFileEvent;
 

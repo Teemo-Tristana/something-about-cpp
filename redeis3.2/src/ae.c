@@ -500,6 +500,7 @@ int aeProcessEvents(aeEventLoop *eventLoop, int flags)
         }
 
          /* before sleep callback. */
+         // 调用之前做的处理
         if (eventLoop->beforesleep != NULL && flags & AE_CALL_BEFORE_SLEEP)
             eventLoop->beforesleep(eventLoop);
 
