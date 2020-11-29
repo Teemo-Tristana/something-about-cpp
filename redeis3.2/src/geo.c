@@ -45,14 +45,25 @@ int zslValueLteMax(double value, zrangespec *spec);
  *   - georadiusbymember - search radius based on geoset member position
  * ==================================================================== */
 
+
+/* ====================================================================
+ * 本文件实现以下命令：
+ * 
+ *   - geoadd - 将 坐标值添加到 geoset 集合中
+ *   - georadius - 在 geoset 集合中按半径进行搜索
+ *   - georadiusbymember - 基于半径大小搜寻 geoset 的成员
+ * ==================================================================== */
+
 /* ====================================================================
  * geoArray implementation
  * ==================================================================== */
 
 /* Create a new array of geoPoints. */
+/* 创建 geoPoint 数组 */
 geoArray *geoArrayCreate(void) {
     geoArray *ga = zmalloc(sizeof(*ga));
     /* It gets allocated on first geoArrayAppend() call. */
+    /* 本函数只是创建一个空数组， 在调用 geoArrayApen() 函数时才进行初始化 */
     ga->array = NULL;
     ga->buckets = 0;
     ga->used = 0;
@@ -61,19 +72,35 @@ geoArray *geoArrayCreate(void) {
 
 /* Add a new entry and return its pointer so that the caller can populate
  * it with data. */
+/**
+ * 添加新元素
+ * 返回值是指向它的指针，调用者通过指针来填充数据
+ */
 geoPoint *geoArrayAppend(geoArray *ga) {
+    // 判断 geoArray 数组是否用完
     if (ga->used == ga->buckets) {
+        /**
+         * 若用完，则进行扩容，扩容措施：
+         * 若 geoArray 数组为空，则 分配 8 个空间大小
+         * 否则，则扩容至原数组大小的 2 倍
+        */
         ga->buckets = (ga->buckets == 0) ? 8 : ga->buckets*2;
         ga->array = zrealloc(ga->array,sizeof(geoPoint)*ga->buckets);
     }
+
+    // 移动指针，指向下一个可用项
     geoPoint *gp = ga->array+ga->used;
+
+    // 已用数目自增
     ga->used++;
     return gp;
 }
 
 /* Destroy a geoArray created with geoArrayCreate(). */
+/* 销毁 geoArray 数组 */
 void geoArrayFree(geoArray *ga) {
     size_t i;
+    // 释放已用项的空间
     for (i = 0; i < ga->used; i++) sdsfree(ga->array[i].member);
     zfree(ga->array);
     zfree(ga);
@@ -82,22 +109,39 @@ void geoArrayFree(geoArray *ga) {
 /* ====================================================================
  * Helpers
  * ==================================================================== */
+
+/**
+ * 从 bits 参数中解码出经度和维度)
+ * 然后分别存储到 xy[0] 和 xy[1] 中
+*/
 int decodeGeohash(double bits, double *xy) {
+    // 由 bits 参数计算 geohash 值
     GeoHashBits hash = { .bits = (uint64_t)bits, .step = GEO_STEP_MAX };
+    
+    // 由 geohash 值中解码出经度和维度值并存储到 xy 中
     return geohashDecodeToLongLatWGS84(hash, xy);
 }
 
 /* Input Argument Helper */
 /* Take a pointer to the latitude arg then use the next arg for longitude.
  * On parse error C_ERR is returned, otherwise C_OK. */
+/**
+ * 提取经纬度
+ * 失败返回 C_ERR, 否则返回 C_OK
+*/
 int extractLongLatOrReply(client *c, robj **argv, double *xy) {
     int i;
+
+    // 两次循环，第一个循环提取出经度，第二次循环提取出维度
     for (i = 0; i < 2; i++) {
+        // 获取 double 类型的经度或维度
         if (getDoubleFromObjectOrReply(c, argv[i], xy + i, NULL) !=
             C_OK) {
             return C_ERR;
         }
     }
+
+    // 判断 经度和纬度是否在有效范围内
     if (xy[0] < GEO_LONG_MIN || xy[0] > GEO_LONG_MAX ||
         xy[1] < GEO_LAT_MIN  || xy[1] > GEO_LAT_MAX) {
         addReplySds(c, sdscatprintf(sdsempty(),
@@ -110,10 +154,18 @@ int extractLongLatOrReply(client *c, robj **argv, double *xy) {
 /* Input Argument Helper */
 /* Decode lat/long from a zset member's score.
  * Returns C_OK on successful decoding, otherwise C_ERR is returned. */
+
+/**
+ * 从 zset 的 score 成员中解码出经度和纬度
+ * 成功返回 C_OK, 否在返回 C_ERR
+*/
 int longLatFromMember(robj *zobj, robj *member, double *xy) {
     double score = 0;
 
+    // 从 zset 集合中获取 score 成员
     if (zsetScore(zobj, member->ptr, &score) == C_ERR) return C_ERR;
+    
+    // 从 score 中解析出进度和纬度
     if (!decodeGeohash(score, xy)) return C_ERR;
     return C_OK;
 }
@@ -124,16 +176,28 @@ int longLatFromMember(robj *zobj, robj *member, double *xy) {
  *
  * If the unit is not valid, an error is reported to the client, and a value
  * less than zero is returned. */
+/**
+ * 检查参数 unit 是否与已有的 unit 匹配，获取用户指定的单位，并根据单位决定进行单位转换所需的乘法因子
+ * 若转换单位无效，则报告给 client，并返回 负数
+ * 只支持四种单位：米、千米、英寸、英里
+*/
 double extractUnitOrReply(client *c, robj *unit) {
     char *u = unit->ptr;
 
+    // 米
     if (!strcmp(u, "m")) {
         return 1;
-    } else if (!strcmp(u, "km")) {
+    } 
+    // 千米
+    else if (!strcmp(u, "km")) {
         return 1000;
-    } else if (!strcmp(u, "ft")) {
+    } 
+    // 英寸
+    else if (!strcmp(u, "ft")) {
         return 0.3048;
-    } else if (!strcmp(u, "mi")) {
+    } 
+    // 英里(1mile=1.609344km=5280feet)
+    else if (!strcmp(u, "mi")) {
         return 1609.34;
     } else {
         addReplyError(c,
