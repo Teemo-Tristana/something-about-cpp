@@ -26,33 +26,36 @@
 #include <signal.h>
 
 /* values */
-volatile int timerexpired=0;
-int speed=0;
-int failed=0;
-int bytes=0;
+volatile int timerexpired=0; // 判断测试是否达到预设时间
+int speed=0; // 服务器成功响应的数量
+int failed=0; // 失败响应的数量
+int bytes=0; // 服务器成功响应进程对读取的字节数，force = 0时才有效
 
 /* globals */
+// HTTP协议版本：默认版本 HTTP/1.0
 int http10=1; /* 0 - http/0.9, 1 - http/1.0, 2 - http/1.1 */
 /* Allow: GET, HEAD, OPTIONS, TRACE */
+// HTTP的请求方法，默认是 GET
 #define METHOD_GET 0
 #define METHOD_HEAD 1
 #define METHOD_OPTIONS 2
 #define METHOD_TRACE 3
 #define PROGRAM_VERSION "1.5"
 int method=METHOD_GET;
-int clients=1;
-int force=0;
-int force_reload=0;
-int proxyport=80;
-char *proxyhost=NULL;
-int benchtime=30;
+int clients=1; // 并发数目(创建子进程进程个数)，默认位1个
+int force=0; // 是否等待读取 server 返回的 结果(=0表示读取)
+int force_reload=0; //是否使用缓存 1不使用 0使用
+int proxyport=80;//(代理)端口号
+char *proxyhost=NULL; // 代理服务器地址
+int benchtime=30; // 测压时间(默认30s)
 
 /* internal */
-int mypipe[2];
-char host[MAXHOSTNAMELEN];
-#define REQUEST_SIZE 2048
-char request[REQUEST_SIZE];
+int mypipe[2]; // 管道，用于父子进程间通信
+char host[MAXHOSTNAMELEN]; // 目标主机地址
+#define REQUEST_SIZE 2048 /
+char request[REQUEST_SIZE]; // 构造发送的HTTP请求
 
+// 选项 getopt_long 的参数
 static const struct option long_options[]=
 {
     {"force",no_argument,&force,1},
@@ -77,6 +80,7 @@ static void benchcore(const char* host,const int port, const char *request);
 static int bench(void);
 static void build_request(const char *url);
 
+// 定时时间 
 static void alarm_handler(int signal)
 {
     timerexpired=1;
@@ -108,6 +112,11 @@ static void usage(void)
  * webbench -c 1000 -t 60 http://liuzhichao.com/index.php
  * webbench -c 1000 -t 60 http://172.20.20.214:12345/1
 */
+/**
+ * 首先进程参数解析
+ * 然后调用 build_request() 构建 HTTP 请求头
+ * 最后调用 bench()执行测压
+*/
 int main(int argc, char *argv[])
 {
     int opt=0; // getopt_long返回值
@@ -119,8 +128,9 @@ int main(int argc, char *argv[])
         usage();
         return 2;
     } 
-    // getopt_long()读取命令行和解析参数，并设置涉及到的全局变量
+
     /**
+     * getopt_long()读取命令行和解析参数，并设置涉及到的全局变量
      * getopt_long原型： int getopt_long(int argc, char * const argv[], const char *optstring, const struct option *longopts, int *longindex);
     */
     while((opt=getopt_long(argc,argv,"912Vfrt:p:c:?h",long_options,&options_index))!=EOF )
@@ -130,19 +140,23 @@ int main(int argc, char *argv[])
             case  0 : break;
             case 'f': force=1;break;
             case 'r': force_reload=1;break; 
-            case '9': http10=0;break;
-            case '1': http10=1;break;
-            case '2': http10=2;break;
+            case '9': http10=0;break; // HTTP/0.9
+            case '1': http10=1;break; // HTTP/1.0
+            case '2': http10=2;break; // HTTP/1.1
             case 'V': printf(PROGRAM_VERSION"\n");exit(0);
 
-            // -t 后面跟着的是压力测试时间，需要将optarg转为整数
+            // -t 压力测试时间，需要将optarg转为整数
             case 't': benchtime=atoi(optarg);break;	     
             case 'p': 
             /* proxy server parsing server:port */
-            /* 解析端口 */
             /**
              * char *strrchr(const char *str, int c)
              * 在参数 str 所指向的字符串中搜索 最后一次出现字符 c（一个无符号字符）的位置。
+             * 
+             * 解析端口 
+             * 使用 ":"分割字符串
+             * eg：-p 127.0.0.1:1080
+             * tmp = 1080
             */
             tmp=strrchr(optarg,':'); // 端口
             proxyhost=optarg; // 主机
@@ -150,11 +164,14 @@ int main(int argc, char *argv[])
             {
                 break;
             }
+            
+            // 判断是否提供了主机名
             if(tmp==optarg)
             {
                 fprintf(stderr,"Error in option --proxy %s: Missing hostname.\n",optarg);
                 return 2;
             }
+            // 判断是否提供端口号
             if(tmp==optarg+strlen(optarg)-1)
             {
                 fprintf(stderr,"Error in option --proxy %s Port number is missing.\n",optarg);
@@ -171,8 +188,7 @@ int main(int argc, char *argv[])
             case 'c': clients=atoi(optarg);break;
         }
     }
-    /* 扫描参数选项时，optind标识下一个选项的索引；扫描结束后，标识第一个非选项参数索引；如
-     * 果optind=argc，说明非选项参数即服务器URL缺失。此变量是系统定义的。
+    /*
      * optind返回第一个不包含选项的命令名参数，此处为URL值 
      */
     if(optind==argc) {
@@ -236,10 +252,13 @@ int main(int argc, char *argv[])
     
     printf(".\n");
     
+    // 开始进行测压
     return bench();
 }
 
 /**
+ * 用于构建 url 的请求头部
+ * 
  * 此函数主要目的是要把类似于http GET请求的信息全部存储到全局变量request[REQUEST_SIZE]
  * 中，其中换行操作使用"\r\n"。其中应用了大量的字符串操作函数。
  * 创建url请求连接，HTTP头，创建好的请求放在全局变量re
@@ -254,11 +273,13 @@ void build_request(const char *url)
     memset(host,0,MAXHOSTNAMELEN);
     memset(request,0,REQUEST_SIZE);
 
+    // 协议选择
     if(force_reload && proxyhost!=NULL && http10<1) http10=1;
     if(method==METHOD_HEAD && http10<1) http10=1;
     if(method==METHOD_OPTIONS && http10<2) http10=2;
     if(method==METHOD_TRACE && http10<2) http10=2;
 
+    // 方法选择
     switch(method)
     {
         default:
@@ -268,6 +289,7 @@ void build_request(const char *url)
         case METHOD_TRACE: strcpy(request,"TRACE");break;
     }
 
+    // 追加空格
     strcat(request," ");
 
     if(NULL==strstr(url,"://"))
@@ -351,6 +373,12 @@ void build_request(const char *url)
 }
 
 /* vraci system rc error kod */
+/**
+ * 先进行 socket 连接，若成功，则创建管道，用于子进程向父进程传输数据
+ * 子进程是主进程通过fork调用复制出来，每个子进程都会调用 benchcore 进行测试，
+ * 并将结果输出到管道
+ * 父进程通过读取管道收集子进程的测压数据，并汇总显现结果。
+*/
 static int bench(void)
 {
     int i,j,k;	
@@ -358,6 +386,7 @@ static int bench(void)
     FILE *f;
 
     /* check avaibility of target server */
+    // 检查目标服务器数量
     i=Socket(proxyhost==NULL?host:proxyhost,proxyport);
     if(i<0) { 
         fprintf(stderr,"\nConnect to server failed. Aborting benchmark.\n");
@@ -366,6 +395,7 @@ static int bench(void)
     close(i);
     
     /* create pipe */
+    // 创建管道
     if(pipe(mypipe))
     {
         perror("pipe failed.");
@@ -381,17 +411,27 @@ static int bench(void)
     */
 
     /* fork childs */
+    // 创建指定数量的子进程
     for(i=0;i<clients;i++)
     {
-        pid=fork();
+        /** 
+         * fork()
+         * 成功： 在父进程中返回子进程 PID
+         *        在子进程中返回 0
+         * 失败： 返回< 0 的数
+         */
+        pid=fork(); 
+
+        // 这里将 返回成功(在进程中)与 失败一起处理了(不推荐)[因为你不知道什么时候进程结束]
         if(pid <= (pid_t) 0)
         {
             /* child process or error*/
             sleep(1); /* make childs faster */
-            break;
+            break; //若是子进程或失败，则跳出循环
         }
     }
 
+    // 创建子进程失败
     if( pid < (pid_t) 0)
     {
         fprintf(stderr,"problems forking worker no. %d\n",i);
@@ -399,15 +439,18 @@ static int bench(void)
         return 3;
     }
 
+    // 子进程：在子进程中调用 benchcore 并将结果写入到管道
     if(pid == (pid_t) 0)
     {
         /* I am a child */
+        // 在子进程中发送数据，但发送的是全局变量？？
         if(proxyhost==NULL)
             benchcore(host,proxyport,request);
         else
             benchcore(proxyhost,proxyport,request);
 
         /* write results to pipe */
+        // 管道是 单向通信， 0 读 1写， 这里写入管道，但是 mypipe[0]端的写并没有关闭
         f=fdopen(mypipe[1],"w");
         if(f==NULL)
         {
@@ -420,8 +463,10 @@ static int bench(void)
 
         return 0;
     } 
+    // 父进程读取管道中的数据
     else
     {
+        // 管道是 单向通信， 0 读 1写， 这里读取管道，但是 mypipe1]端的读并没有关闭
         f=fdopen(mypipe[0],"r");
         if(f==NULL) 
         {
@@ -429,12 +474,16 @@ static int bench(void)
             return 3;
         }
         
+        // _IONBF : 直接从流中读入数据或直接向流中写入数据，而没有缓冲区
+        // 设置无缓冲
         setvbuf(f,NULL,_IONBF,0);
         
+        // 重置变量，防止使用被污染的数据
         speed=0;
         failed=0;
         bytes=0;
     
+        // 从管道中读取数据， fscanf() 是阻塞函数
         while(1)
         {
             pid=fscanf(f,"%d %d %d",&i,&j,&k);
@@ -444,16 +493,19 @@ static int bench(void)
                 break;
             }
             
+            // 父进程利用管道统计子进程中三种数据的和
             speed+=i;
             failed+=j;
             bytes+=k;
         
             /* fprintf(stderr,"*Knock* %d %d read=%d\n",speed,failed,pid); */
+            // 记录已读取子进程数量，读完(=0)则退出
             if(--clients==0) break;
         }
     
         fclose(f);
 
+        // 输出
         printf("\nSpeed=%d pages/min, %d bytes/sec.\nRequests: %d susceed, %d failed.\n",
             (int)((speed+failed)/(benchtime/60.0f)),
             (int)(bytes/(float)benchtime),
@@ -464,24 +516,43 @@ static int bench(void)
     return i;
 }
 
+/**
+ * 测试函数(被子进程调用)
+ *  通过 SIGALRM 信号来控制时间， 通过 alarm 设置在指定时间后触发 SIGALRM 信号，从而执行 alrm_handler()
+ * 
+ * host 地址
+ * port 端口
+ * req ： http 格式方法
+*/
 void benchcore(const char *host,const int port,const char *req)
 {
     int rlen;
+
+    // 记录服务器请求的返回结果
     char buf[1500];
     int s,i;
     struct sigaction sa;
 
     /* setup alarm signal handler */
+    // 信号处理函数(SIGALRM 信号的回调函数)
     sa.sa_handler=alarm_handler;
     sa.sa_flags=0;
+    /**
+     *  信号函数 sigacation() 
+     *  成功 返回 0，失败返回 1， 超时产生 SIGALRM 信号，采用sa指定的函数进行处理
+     */
     if(sigaction(SIGALRM,&sa,NULL))
         exit(3);
     
+    // 设置定时器(开始计时)，超过 benchtime就产生 SIGALRM 信号
     alarm(benchtime); // after benchtime,then exit
 
     rlen=strlen(req);
+
+    // 无限次请求，直到收到 SIGALRM 信号
     nexttry:while(1)
     {
+        // 超时则返回
         if(timerexpired)
         {
             if(failed>0)
@@ -492,17 +563,26 @@ void benchcore(const char *host,const int port,const char *req)
             return;
         }
         
+        // 与远程服务器建立连接（通过socket建立TCP连接）
         s=Socket(host,port);                          
+        // 失败
         if(s<0) { failed++;continue;} 
+        // 发出请求：header大小与发送大小不等，则失败
         if(rlen!=write(s,req,rlen)) {failed++;close(s);continue;}
         if(http10==0) 
         if(shutdown(s,1)) { failed++;close(s);continue;}
+
+        // 等待服务返回结果
         if(force==0) 
         {
             /* read all available data from socket */
+            // 读取socket中读取数据
             while(1)
             {
+                // timerexpired 默认为 0， 在指定时间内部读取，为1时，则表示定时结束
                 if(timerexpired) break; 
+
+                // 从 buf 中读取数
                 i=read(s,buf,1500);
                 /* fprintf(stderr,"%d\n",i); */
                 if(i<0) 
@@ -517,6 +597,8 @@ void benchcore(const char *host,const int port,const char *req)
                 bytes+=i;
             }
         }
+
+        // 关闭连接
         if(close(s)) {failed++;continue;}
         speed++;
     }

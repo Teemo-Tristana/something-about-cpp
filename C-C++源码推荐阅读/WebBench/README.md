@@ -1,3 +1,4 @@
+
 # WebBench
 
 Webbench是一个在linux下使用的非常简单的网站压测工具。它使用fork()模拟多个客户端同时访问我们设定的URL，测试网站在压力下工作的性能，最多可以模拟3万个并发连接去测试网站的负载能力。
@@ -36,3 +37,4 @@ ctags
 + socket.c 封装了一个socket模块
 + webbench.c 是主要文件， 完成整个网站过程
 	+ 阅读顺序： main -> 对命令参数的解析 -> 调用 bulid_request函数构建HTTP的"get"请求头部 -> 调用bench测试函数 -> 主进程读取管道 -> 输出
+![wenbench工作流程图](./wenbench工作流程图.png)
